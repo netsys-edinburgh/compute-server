@@ -23,7 +23,14 @@ rspec = PG.Request()
 pc.defineParameter("machineNum", "Number of Machines",
                    portal.ParameterType.INTEGER, 1)
 pc.defineParameter("Hardware", "Machine Hardware",
-                   portal.ParameterType.STRING,"d430",[("d430","d430"),("d710","d710"), ("d820", "d820"), ("pc3000", "pc3000"), ("d740", "d740"), ("d840", "d840")])
+                   portal.ParameterType.STRING, "d430",
+                   [("d430", "d430"), 
+                    ("d710", "d710"), 
+                    ("d820", "d820"), 
+                    ("pc3000", "pc3000"), 
+                    ("d740", "d740"), 
+                    ("d840", "d840"),
+                    ("c6620", "c6620")])
 pc.defineParameter("OS", "Operating System",
                    portal.ParameterType.STRING,"ubuntu18",[("ubuntu18","ubuntu18"),("ubuntu20","ubuntu20"), ("ubuntu22", "ubuntu22")])
 
@@ -93,7 +100,7 @@ network.best_effort = True
 if params.OS == 'ubuntu20':
     os = 'urn:publicid:IDN+emulab.net+image+emulab-ops:UBUNTU20-64-STD'
 elif params.OS == 'ubuntu22':
-    os = 'urn:publicid:IDN+emulab.net+image+emulab-ops//UBUNTU22-64-BETA'
+    os = 'urn:publicid:IDN+emulab.net+image+emulab-ops//UBUNTU22-64-STD'
 else:
     os = 'urn:publicid:IDN+emulab.net+image+emulab-ops:UBUNTU18-64-STD'
 
