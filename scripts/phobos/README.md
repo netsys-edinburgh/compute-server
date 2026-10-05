@@ -50,6 +50,6 @@ Every step is idempotent and marked in `~/.phobos/<step>.done`; re-running
 
 The profile builds and stages only the UE (`/opt/phobos-ue`); the gNB comes from `docker.io/ujjwal1997/phobos-ran:new`.
 gNB fixes made on `openairinterface5g` phobos-ue (2026-10-05: D-26 handover-source reconfiguration-complete assertion,
-Msg3 stale UL_TTI) reach a fresh deployment only once that image is rebuilt and pushed
-(`phobos-console/qa/image-contexts.sh` + `qa/push-images.sh`). Until then, run `phobos-console/qa/stage-gnb.sh` on the
+Msg3 stale UL_TTI) reach a fresh deployment through that image (rebuilt and pushed 2026-10-05 as `:new` and `:20261005`; rebuild it after further gNB changes
+with `phobos-console/qa/image-contexts.sh` + `qa/push-images.sh`). To test gNB changes before that, run `phobos-console/qa/stage-gnb.sh` on the
 controller and set `placement.gnb_bin_dir: /opt/phobos-gnb` in console.yaml. Agent handoff: `phobos-console/AGENTS.md`.
