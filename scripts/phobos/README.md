@@ -45,3 +45,11 @@ Every step is idempotent and marked in `~/.phobos/<step>.done`; re-running
    `taskset -c 19-23`) only need machines with >= 19 / >= 24 cores. The worker nodes pin the VM's vCPUs to 2..52
    (>= 56 CPUs) or 2..24 (>= 32) and the slot checker to core 2.
 6. **Private repos** (`chronos-kernel`, `fake_tsc`) need the GitHub user/token parameters, as before.
+
+## gNB build used by a fresh deployment
+
+The profile builds and stages only the UE (`/opt/phobos-ue`); the gNB comes from `docker.io/ujjwal1997/phobos-ran:new`.
+gNB fixes made on `openairinterface5g` phobos-ue (2026-10-05: D-26 handover-source reconfiguration-complete assertion,
+Msg3 stale UL_TTI) reach a fresh deployment only once that image is rebuilt and pushed
+(`phobos-console/qa/image-contexts.sh` + `qa/push-images.sh`). Until then, run `phobos-console/qa/stage-gnb.sh` on the
+controller and set `placement.gnb_bin_dir: /opt/phobos-gnb` in console.yaml. Agent handoff: `phobos-console/AGENTS.md`.
