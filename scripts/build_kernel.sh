@@ -33,6 +33,10 @@ INSTANCE_ID="$4"
 MACHINE_PNUM="$5"
 NUM_GNB="$6"
 NUM_UE="$7"
+CONTROL_PLANE="${8:-chronos-auto-deploy}"   # chronos-auto-deploy | phobos-console (one-click phobos, Step 7)
+PHOBOS_CONSOLE_BRANCH="${9:-main}"
+PHOBOS_5G_BRANCH="${10:-new-oai-port}"
+PHOBOS_OAI_BRANCH="${11:-phobos-ue}"
 
 step_log "Number of arguments: $#"
 step_log "GitHub token: $GITHUB_TOKEN"
@@ -42,6 +46,7 @@ step_log "Number of Proxy Machines: $MACHINE_PNUM"
 step_log "Instance ID: $INSTANCE_ID"
 step_log "Number of gNB: $NUM_GNB"
 step_log "Number of UE: $NUM_UE"
+step_log "Control plane: $CONTROL_PLANE"
 
 # Shared lock-tolerant / retrying apt + download wrappers. These hard-fail loudly on
 # exhaustion of their per-occurrence budget, which (since this script has no `set -e`)
@@ -800,6 +805,33 @@ EOF
 grep -qxF '[ -f ~/.chronos ] && source ~/.chronos' \$HOME/.bashrc || echo '[ -f ~/.chronos ] && source ~/.chronos' >> \$HOME/.bashrc"
 
     touch /local/.audo_deploy_setup
+fi
+
+################################################################################
+# Step 7: One-click phobos (controlPlane = phobos-console)
+################################################################################
+# Preconditions
+#   - /local/.audo_deploy_setup exists (controller VM has k0s, the shared key, kubectl)
+#   - /local/.phobos_started does NOT exist
+#   - $INSTANCE_ID must be 0 and $CONTROL_PLANE must be phobos-console
+# Copies scripts/phobos into the controller VM and starts controller_setup.sh there, detached: it waits for every
+# other node to join, prepares hypervisors/VMs, builds and stages the UE bundle and proxy, deploys Open5GS,
+# installs and starts phobos-console, runs preflight and deploys numGNB x numUE.  Progress:
+# ins0vm:~/.phobos/setup.log ; result: ins0vm:~/PHOBOS_READY.  Re-running resumes after the last finished step.
+################################################################################
+if [ -f "/local/.audo_deploy_setup" ] && [ ! -f "/local/.phobos_started" ] && [ "$INSTANCE_ID" -eq 0 ] \
+    && [ "$CONTROL_PLANE" = "phobos-console" ]; then
+    step_log "Starting one-click phobos inside the controller VM (${VM_NAME})"
+    ssh $SSH_OPTS ubuntu@"${INTERNAL_IP}" "mkdir -p /home/ubuntu/phobos-setup" \
+        || { echo "FATAL: cannot reach ${VM_NAME}"; exit 1; }
+    scp $SSH_OPTS /local/repository/scripts/phobos/* ubuntu@"${INTERNAL_IP}":/home/ubuntu/phobos-setup/ \
+        || { echo "FATAL: could not copy scripts/phobos into ${VM_NAME}"; exit 1; }
+    ssh $SSH_OPTS ubuntu@"${INTERNAL_IP}" "chmod +x /home/ubuntu/phobos-setup/*.sh /home/ubuntu/phobos-setup/*.py && \
+        setsid nohup bash /home/ubuntu/phobos-setup/controller_setup.sh ${MACHINE_NUM} ${MACHINE_PNUM} ${NUM_GNB} ${NUM_UE} \
+        '${GITHUB_USERNAME}' '${GITHUB_TOKEN}' ${PHOBOS_CONSOLE_BRANCH} ${PHOBOS_5G_BRANCH} ${PHOBOS_OAI_BRANCH} \
+        > /home/ubuntu/phobos-setup/run.out 2>&1 < /dev/null &" \
+        || { echo "FATAL: could not start controller_setup.sh in ${VM_NAME}"; exit 1; }
+    touch /local/.phobos_started
 fi
 
 ################################################################################

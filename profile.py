@@ -11,6 +11,12 @@ kube_instruction= \
     """
     ## Once ready
 
+    **controlPlane = phobos-console (default):** nothing to run. When `ins0vm:~/PHOBOS_READY`
+    appears the console is up on ins0vm port 8090 (`ssh -L 8090:localhost:8090` via node0) with
+    numGNB x numUE deployed. Progress: `ins0vm:~/.phobos/setup.log`.
+
+    **controlPlane = chronos-auto-deploy:**
+
     1. SSH to node0 (k8s controller, ins0vm).
     2. Run `chronos-auto-deploy/run-experiment.sh` to deploy the five
        Chronos components (globalsc, core, proxy, gnb, ue).
@@ -82,6 +88,19 @@ pc.defineParameter(
     [("ubuntu18", "ubuntu18"), ("ubuntu20", "ubuntu20"), ("ubuntu22", "ubuntu22")],
     longDescription="Base image for every node. ubuntu22 is the tested default.")
 
+pc.defineParameter(
+    "controlPlane", "Control plane", portal.ParameterType.STRING, "phobos-console",
+    [("phobos-console", "phobos-console (one click: console up, emulation deployed)"),
+     ("chronos-auto-deploy", "chronos-auto-deploy (manual run-experiment.sh)")],
+    longDescription="phobos-console: once every node has joined, the controller VM prepares hypervisors and VMs, "
+        "builds and stages the phobos UE and proxy, deploys Open5GS, starts phobos-console on port 8090 and "
+        "deploys numGNB x numUE. Progress in ins0vm:~/.phobos/setup.log, result in ins0vm:~/PHOBOS_READY.")
+pc.defineParameter("phobosConsoleBranch", "phobos-console branch", portal.ParameterType.STRING, "main", groupId="phobos")
+pc.defineParameter("phobos5gBranch", "phobos-5g branch", portal.ParameterType.STRING, "new-oai-port", groupId="phobos")
+pc.defineParameter("phobosOaiBranch", "openairinterface5g branch (UE build)", portal.ParameterType.STRING,
+                   "phobos-ue", groupId="phobos")
+pc.defineParameterGroup("phobos", "phobos sources (one-click)")
+
 #GitHub parameters
 pc.defineParameter("githubUser","GitHub Username",
                    portal.ParameterType.STRING,"",groupId="github")
@@ -150,14 +169,16 @@ for i in range(0,params.machineNum+1):
     node = rspec.RawPC("node" + str(i))
     node.disk_image = os
     node.addService(PG.Execute(shell="bash", command=profileConfigs + "/local/repository/scripts/configure.sh"))
-    command = "/local/repository/scripts/build_kernel.sh {} {} {} {} {} {} {}".format(
+    command = "/local/repository/scripts/build_kernel.sh {} {} {} {} {} {} {} {} {} {} {}".format(
     params.token,           # $1 = token
     params.githubUser,      # $2 = GitHub username
     params.machineNum+1,    # $3 = machine number
     i,                      # $4 = instance index
     params.machinePNum,     # $5 = proxy node count
     params.numGNB,          # $6 = number of gNB
-    params.numUE)           # $7 = number of UE
+    params.numUE,           # $7 = number of UE
+    params.controlPlane,    # $8 = control plane (phobos-console = one-click phobos)
+    params.phobosConsoleBranch, params.phobos5gBranch, params.phobosOaiBranch)  # $9..$11
     node.addService(PG.Execute(shell="bash", command=command))
     # Fail-loud verification that this node's inner VM was created and joined k0s.
     node.addService(PG.Execute(shell="bash", command="/local/repository/scripts/verify_node.sh {}".format(i)))
