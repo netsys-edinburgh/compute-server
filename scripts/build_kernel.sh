@@ -56,6 +56,21 @@ source /local/repository/scripts/retry_helpers.sh
 # authorized_keys set, guest password lockout).
 source /local/repository/scripts/experiment_ssh_key.sh
 
+# Host CPU layout for the dilated VM, derived from the host's CPU count (was a fixed 51 vCPUs, which left
+# 11 of a 64-CPU host idle and pinned vCPU 0 onto the slot checker's CPU 2, where the FIFO-99 checker
+# preempted it every slot):
+#   0          host housekeeping (sshd, libvirt, kernel threads, IRQs)
+#   1          QEMU emulator thread + iothread (vhost workers run in the emulator's cgroup)
+#   2          chronos slot checker (start_slotchecker.sh: taskset -c 2, chrt -f 99)
+#   3..N-1     guest vCPUs, one host CPU each  -> N-3 vCPUs (61 on a 64-CPU host)
+# vCPU threads are SCHED_FIFO: none may share CPU 0 (it would starve the host) or CPU 2 (the checker).
+HOST_CPUS=$(nproc --all)
+VM_VCPUS=$((HOST_CPUS - 3))
+VCPU_FIRST_CPU=3
+EMULATORPIN_CPUSET=1
+IOTHREADPIN_CPUSET=1
+ISOLATED_CORES="1-$((HOST_CPUS - 1))"
+
 
 USER_HOME="/users/$(whoami)"
 echo "Number of machines in this experiments are ${MACHINE_NUM}"
@@ -154,7 +169,7 @@ if [ ! -f "/local/.kernel_done" ]; then
     export line to grub.d/00_tuned
     echo 'echo "export tuned_params"' | sudo tee -a /etc/grub.d/00_tuned
 
-    echo "isolated_cores=2-55" | sudo tee /etc/tuned/realtime-variables.conf
+    echo "isolated_cores=${ISOLATED_CORES}" | sudo tee /etc/tuned/realtime-variables.conf
 
     sudo sed -i '/^cmdline_realtime=/d' /usr/lib/tuned/realtime/tuned.conf
 
@@ -337,7 +352,7 @@ if [ -f "/local/.tsc_done" ] && [ ! -f "/local/.vm_setup_done" ]; then
     # auth on. Omitting it is what actually makes the guest key-only.
     if ! sudo uvt-kvm create "${VM_NAME}" \
             release=focal arch=amd64 \
-            --cpu 51 --memory 114096 \
+            --cpu "${VM_VCPUS}" --memory 114096 \
             --ssh-public-key-file "${CHRONOS_GUEST_AUTH_KEYS}" --disk 200; then
         echo "❌ uvt-kvm create failed, aborting"; exit 1
     fi
@@ -387,39 +402,27 @@ if [ -f "/local/.tsc_done" ] && [ ! -f "/local/.vm_setup_done" ]; then
         </clock>" "$TMP_XML"
 
 step_log "pinning cpu"
-        # Ensure <vcpu> = 54 and placement='static'
-NUM_CPU=$(lscpu | grep "^CPU(s):" | awk -F ' ' '{ print $2 }')
-[ "$NUM_CPU" -lt "32" ] && {
+[ "$HOST_CPUS" -lt "32" ] && {
   echo "<32 CPU cores"
   echo "Aborting"
   exit 1
 }
-SEQVAR="22"
-EMULATORPIN_CPUSET="23"
-IOTHREADPIN_CPUSET="24"
-VCPUSCHED="22"
-[ "$NUM_CPU" -ge "56" ] && {
-  echo ">= 56 CPU cores"
-  SEQVAR="50"
-  EMULATORPIN_CPUSET="53"
-  IOTHREADPIN_CPUSET="54"
-  VCPUSCHED="50"
-}
+echo "${HOST_CPUS} host CPUs: ${VM_VCPUS} vCPUs on CPUs ${VCPU_FIRST_CPU}-$((VCPU_FIRST_CPU + VM_VCPUS - 1)), emulator ${EMULATORPIN_CPUSET}, iothread ${IOTHREADPIN_CPUSET}"
 block=$(
   echo "  <iothreads>1</iothreads>"
   echo "  <cputune>"
-  for i in $(seq 0 $SEQVAR); do
-    printf "    <vcpupin vcpu='%d' cpuset='%d'/>\n" "$i" "$((i+2))"
+  for i in $(seq 0 $((VM_VCPUS - 1))); do
+    printf "    <vcpupin vcpu='%d' cpuset='%d'/>\n" "$i" "$((i + VCPU_FIRST_CPU))"
   done
   echo "    <emulatorpin cpuset='$EMULATORPIN_CPUSET'/>"
   echo "    <iothreadpin iothread='1' cpuset='$IOTHREADPIN_CPUSET'/>"
   echo "    <vcpusched vcpus='0'    scheduler='fifo' priority='1'/>"
-  echo "    <vcpusched vcpus='1-$VCPUSCHED' scheduler='fifo' priority='1'/>"
+  echo "    <vcpusched vcpus='1-$((VM_VCPUS - 1))' scheduler='fifo' priority='1'/>"
   echo "    <emulatorsched scheduler='fifo' priority='1'/>"
   echo "    <iothreadsched iothreads='1' scheduler='fifo' priority='1'/>"
   echo "  </cputune>"
 )
-sudo sed -i "/<vcpu placement='static'>51<\/vcpu>/r /dev/stdin" "$TMP_XML" <<<"$block"
+sudo sed -i "/<vcpu placement='static'>${VM_VCPUS}<\/vcpu>/r /dev/stdin" "$TMP_XML" <<<"$block"
 
             step_log "Replacing $VM_NAME.xml with modified version and redefining domain"
             sudo mv "$TMP_XML" "$VM_XML"
