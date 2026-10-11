@@ -2,7 +2,8 @@
 
 Instantiate the profile with any number of worker nodes (`machineNum`), proxy nodes (`machinePNum`), the single
 Global-SC node, and `numGNB` / `numUE`. When `ins0vm:~/PHOBOS_READY` appears, phobos-console is running on the
-controller VM (port 8090; from outside `ssh -L 8090:localhost:8090` through node0) with the emulation deployed.
+controller VM (port 8090; from outside at `http://<node0 public IP>:8090`, forwarded by node0's
+`phobos-console-proxy` service) with the emulation deployed.
 
 ## Flow
 

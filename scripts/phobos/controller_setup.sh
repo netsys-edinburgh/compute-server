@@ -149,9 +149,11 @@ if step deploy; then
   done_ deploy
 fi
 IP=$(hostname -I | awk '{print $1}')
+# node0 NATs this VM, so the address the outside sees is node0's public one (node0 forwards :8090 here).
+PUB=$(curl -s --max-time 5 https://ifconfig.me 2>/dev/null | grep -E '^[0-9.]+$' || echo '<node0 public IP>')
 cat > $H/PHOBOS_READY <<READY
 phobos is ready ($(date '+%F %T')).
-  console:   http://$IP:8090  (ssh -L 8090:localhost:8090 to node0 / ins0vm from outside)
+  console:   http://$PUB:8090  (public, forwarded by node0) ; inside the cluster http://$IP:8090
   cluster:   $(cat $STATE/cluster.json)
   emulation: $NUM_GNB gNB(s) x $NUM_UE UE(s) deployed (job in the console's Jobs tab)
   logs:      $LOG ; console: journalctl -u phobos-console

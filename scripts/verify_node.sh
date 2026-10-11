@@ -106,11 +106,10 @@ log "controller reports ${NODE_NAME} Ready ✓"
 #    checker on the outer IP 10.1.$((INSTANCE_ID + 2)).1, so a silent failure
 #    here surfaces only as "Still waiting for components" much later.
 #
-#    Skipped on a node with no dilated-TSC support. build_kernel.sh writes
-#    /local/.tsc_skipped when the CPU is not Intel and it bypasses the kernel/TSC
-#    build entirely -- the normal case for the controller, which runs on AMD
-#    (ManagerHardware=d6515) and is not a dilated component anyway
-#    (dilateFirstNode: False; globalsc's component list starts at 10.1.2.1).
+#    Skipped on a node with no dilated-TSC chain. build_kernel.sh writes
+#    /local/.tsc_skipped when it bypasses the kernel/TSC build entirely -- the
+#    controller, which is not a dilated component (dilateFirstNode: False;
+#    globalsc's component list starts at 10.1.2.1), or an unsupported CPU vendor.
 if [ -f /local/.tsc_skipped ]; then
     log "dilated-TSC chain not applicable on this CPU — skipping runtime-chain checks"
     echo "✅ verify OK: ${VM_NAME} is running and Ready in the k0s cluster"

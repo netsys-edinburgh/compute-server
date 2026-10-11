@@ -12,7 +12,7 @@ kube_instruction= \
     ## Once ready
 
     **controlPlane = phobos-console (default):** nothing to run. When `ins0vm:~/PHOBOS_READY`
-    appears the console is up on ins0vm port 8090 (`ssh -L 8090:localhost:8090` via node0) with
+    appears the console is up at `http://<node0 public IP>:8090` (node0 forwards to ins0vm:8090) with
     numGNB x numUE deployed. Progress: `ins0vm:~/.phobos/setup.log`.
 
     **controlPlane = chronos-auto-deploy:**

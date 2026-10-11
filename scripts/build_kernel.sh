@@ -77,24 +77,36 @@ SSH_OPTS="-oStrictHostKeyChecking=no -oUserKnownHostsFile=/dev/null"
 # Step 1: Kernel Build
 ################################################################################
 CPU_VENDOR=$(lscpu | grep "^Vendor ID:" | awk -F ' ' '{ print $3 }')
-[ "$CPU_VENDOR" != "GenuineIntel" ] && {
-  echo "Not an Intel CPU"
+case "$CPU_VENDOR" in
+  GenuineIntel) KVM_VENDOR_MODULE=kvm_intel ;;
+  AuthenticAMD) KVM_VENDOR_MODULE=kvm_amd ;;
+  *)            KVM_VENDOR_MODULE="" ;;
+esac
+# The dilated-TSC chain (chronos-kernel, custom_tsc, slot checker) is built on
+# every dilated worker, Intel or AMD (chronos-kernel carries the AMD/SVM patch).
+# It is skipped only on the controller, which is not a dilated component
+# (values.yaml has dilateFirstNode: False and globalsc's component list starts
+# at 10.1.2.1), and on a CPU vendor KVM cannot run on at all.
+#
+# Gating this on "is Intel" used to skip the whole chain on AMD workers: setup
+# then finished "successfully", but globalsc waited for its components forever
+# and no UE ever attached.
+if [ "$INSTANCE_ID" -eq 0 ] || [ -z "$KVM_VENDOR_MODULE" ]; then
+  if [ "$INSTANCE_ID" -eq 0 ]; then
+    echo "Controller node (not a dilated component)"
+  else
+    echo "Unsupported CPU vendor: ${CPU_VENDOR}"
+  fi
   echo "Skipping building the custom kernel"
   touch /local/.kernel_done
   touch /local/.rebooted
   touch /local/.tsc_done
   # Record *why* Step 2 was skipped, so later steps can tell "this node has no
-  # dilated-TSC support" apart from "Step 2 should have run and did not".
-  #
-  # This is the normal path for the controller: ManagerHardware is d6515, which
-  # is AMD EPYC, so node0 never builds the custom kernel, never loads
-  # custom_tsc, and therefore never gets /dev/shm/my-little-shared-memory. It
-  # does not need them -- values.yaml has dilateFirstNode: False and globalsc's
-  # component list starts at 10.1.2.1, so the controller is not a dilated
-  # component. Step 5 and verify_node.sh key off this marker instead of
-  # demanding artifacts that cannot exist here.
+  # dilated-TSC chain" apart from "Step 2 should have run and did not". Step 5
+  # and verify_node.sh key off this marker instead of demanding artifacts that
+  # cannot exist here.
   touch /local/.tsc_skipped
-}
+fi
 if [ ! -f "/local/.kernel_done" ]; then
     step_log "Installing kernel build dependencies"
     apt_get_update_soft
@@ -213,11 +225,11 @@ if [ -f "/local/.kernel_done" ] && [ -f "/local/.rebooted" ] && [ ! -f "/local/.
         /etc/modprobe.d/chronos-tsc.conf
 
     step_log "Loading custom_tsc ahead of KVM"
-    sudo rmmod kvm_intel || true
+    sudo rmmod "$KVM_VENDOR_MODULE" || true
     sudo rmmod kvm || true
     lsmod | grep -q '^custom_tsc' || sudo modprobe custom_tsc
     sudo modprobe kvm
-    sudo modprobe kvm_intel
+    sudo modprobe "$KVM_VENDOR_MODULE"
 
     # The module's init creates /dev/shm/my-little-shared-memory; tsc-init then
     # writes its initial contents. Both are lost on reboot (tmpfs), which is why
@@ -728,8 +740,8 @@ if [ -f "/local/.vm_setup_done" ] && [ -f "/local/.net_setup_done" ] && [ ! -f "
             || { echo "❌ FATAL: worker k0s install/join failed inside ${VM_NAME}"; exit 1; }
     fi
     # The slot checker is part of the dilated-TSC chain, so it only applies on a
-    # node that actually built it in Step 2. On a non-Intel node (the controller,
-    # ManagerHardware=d6515) Step 2 is skipped wholesale, and installing the unit
+    # node that actually built it in Step 2. On the controller Step 2 is skipped
+    # wholesale, and installing the unit
     # there just leaves a service that can never start: it mmaps
     # /dev/shm/my-little-shared-memory, which only custom_tsc creates. That is
     # what used to happen -- node0 sat in 'failed' from provisioning onward and
@@ -831,6 +843,29 @@ if [ -f "/local/.audo_deploy_setup" ] && [ ! -f "/local/.phobos_started" ] && [ 
         '${GITHUB_USERNAME}' '${GITHUB_TOKEN}' ${PHOBOS_CONSOLE_BRANCH} ${PHOBOS_5G_BRANCH} ${PHOBOS_OAI_BRANCH} \
         > /home/ubuntu/phobos-setup/run.out 2>&1 < /dev/null &" \
         || { echo "FATAL: could not start controller_setup.sh in ${VM_NAME}"; exit 1; }
+
+    # Expose the console on node0's public IP (http://<node0>:8090). The controller VM only has the
+    # private 10.2.1.2, so forward node0:8090 to it. A systemd unit, so it is back after every reboot,
+    # and it only proxies TCP, so it is up before the console is and simply retries per connection.
+    step_log "Forwarding node0:8090 to phobos-console on ${VM_NAME} (${INTERNAL_IP}:8090)"
+    apt_get_retry install socat
+    sudo tee /etc/systemd/system/phobos-console-proxy.service > /dev/null <<EOF
+[Unit]
+Description=Forward node0:8090 to phobos-console on ${VM_NAME} (${INTERNAL_IP}:8090)
+After=network-online.target libvirtd.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/socat TCP-LISTEN:8090,fork,reuseaddr TCP:${INTERNAL_IP}:8090
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now phobos-console-proxy.service \
+        || { echo "FATAL: could not start phobos-console-proxy.service"; exit 1; }
     touch /local/.phobos_started
 fi
 
