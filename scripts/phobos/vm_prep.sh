@@ -17,6 +17,32 @@ mkdir -p /var/crash && chmod 1777 /var/crash
 echo 'kernel.core_pattern=/var/crash/core.%e.%p.%t' > /etc/sysctl.d/92-phobos-core.conf
 # a quiet console: framebuffer console printing under dilation caused soft lockups (D-4)
 echo 'kernel.printk = 1 4 1 7' > /etc/sysctl.d/93-phobos-console-quiet.conf
+# Receive packet steering: the virtio NIC has one RX queue, so every packet for the VM's hundreds of hostNetwork UEs
+# (slot ticks, DL data) was processed on one vCPU; it fell behind, UEs got their ticks late, missed the slot round and
+# the whole barrier waited for them (2026-10-11, 3x300: 42 -> 96 slots/s and dilation 32 -> 10.5 with RPS/RFS on)
+echo 'net.core.rps_sock_flow_entries = 32768' > /etc/sysctl.d/94-phobos-rps.conf
+cat > /usr/local/sbin/phobos-rps <<'EOF'
+#!/bin/sh
+# spread RX processing of every NIC queue over all CPUs (RPS) and steer flows to their consumer's CPU (RFS)
+n=$(nproc); mask=$(python3 -c "s=format((1<<$n)-1,'x'); s=s.rjust((len(s)+7)//8*8,'0'); print(','.join(s[i:i+8] for i in range(0,len(s),8)))")
+for q in /sys/class/net/*/queues/rx-*; do
+  case "$q" in */lo/*) continue ;; esac
+  echo "$mask" > "$q/rps_cpus"; echo 32768 > "$q/rps_flow_cnt"
+done
+EOF
+chmod 755 /usr/local/sbin/phobos-rps
+cat > /etc/systemd/system/phobos-rps.service <<'EOF'
+[Unit]
+Description=phobos: receive packet steering over all CPUs
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/phobos-rps
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload && systemctl enable --now phobos-rps.service || true
 sysctl -q --system || true
 systemctl disable --now getty@tty1.service 2>/dev/null || true
 G=/etc/default/grub.d/50-cloudimg-settings.cfg
