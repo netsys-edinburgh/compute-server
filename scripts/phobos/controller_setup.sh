@@ -159,3 +159,15 @@ phobos is ready ($(date '+%F %T')).
   logs:      $LOG ; console: journalctl -u phobos-console
 READY
 cat $H/PHOBOS_READY
+# 9. near-RT RIC: deploys with the RIC option run the FlexRIC RIC from /opt/phobos-ric on proxy-1 and the gNB built
+#    with the E2 agent from /opt/phobos-gnb-e2 on every dilated VM; without them the RIC pod never starts ("hostPath
+#    type check failed: /opt/phobos-ric is not a directory"). Built after the console is up (the build is long);
+#    FlexRIC is the OAI submodule (ujjwalpawar/flexric, private: fetched with the same credentials as the clones).
+if step ric; then
+  P=$(url x | sed -E 's#x\.git$##')
+  retry git -C $OAI -c "url.$P.insteadOf=https://github.com/" submodule update --init openair2/E2AP/flexric
+  (cd $CONSOLE && KUBECONFIG=$KUBECONFIG qa/build-ric.sh $H/ric-out && qa/stage-ric.sh $H/ric-out) \
+    || { echo "FATAL: RIC build/stage failed (deploys without the RIC still work)"; exit 1; }
+  done_ ric
+  echo "  ric:       near-RT RIC staged on proxy-1 ($(date '+%F %T')): deploys with the RIC option work" | tee -a $H/PHOBOS_READY
+fi
