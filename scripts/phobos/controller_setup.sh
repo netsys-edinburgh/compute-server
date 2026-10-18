@@ -23,20 +23,32 @@ done_() { touch "$STATE/$1.done"; }
 url() { [ -n "$GH_TOKEN" ] && echo "https://$GH_USER:$GH_TOKEN@github.com/$1.git" || echo "https://github.com/$1.git"; }
 retry() { local n=0; until "$@"; do n=$((n+1)); [ $n -ge 5 ] && return 1; sleep $((n*10)); done; }
 
-# 1. cluster complete: controller + (MACHINE_NUM-1) dilated workers + PROXY_NUM proxies + globalsc, all Ready
+# 1. cluster complete: controller + (MACHINE_NUM-1) dilated workers + PROXY_NUM proxies + globalsc, all Ready.
+#    A machine that never comes up (2026-10-18: node5 hung on its reboot into the chronos kernel) must not stop the
+#    setup: after 20 min, once every non-dilated node is Ready and the dilated workers have not changed for 10 min,
+#    carry on with the Ready ones (the console deploys on the nodes it finds).
 if step cluster; then
-  want_w=$((MACHINE_NUM - 1)); want=$((1 + want_w + PROXY_NUM + 1))
+  want_w=$((MACHINE_NUM - 1)); want_o=$((1 + PROXY_NUM + 1)); want=$((want_o + want_w))
+  last_w=-1; since=0
   for i in $(seq 1 720); do
     ready=$($K get nodes --no-headers 2>/dev/null | awk '$2=="Ready"' | wc -l)
     w=$($K get nodes -l dilated=true --no-headers 2>/dev/null | awk '$2=="Ready"' | wc -l)
     [ "$ready" -ge "$want" ] && [ "$w" -ge "$want_w" ] && break
+    [ "$w" -ne "$last_w" ] && { last_w=$w; since=$i; }
+    if [ "$i" -ge 120 ] && [ "$w" -ge 1 ] && [ $((ready - w)) -ge "$want_o" ] && [ $((i - since)) -ge 60 ]; then
+      echo "WARNING: only $w/$want_w dilated workers Ready after $((i / 6)) min, none new for $(((i - since) / 6)) min:" \
+           "carrying on without the missing ones"
+      $K get nodes -l dilated=true --no-headers | awk '$2!="Ready"'
+      break
+    fi
     [ $((i % 12)) -eq 1 ] && echo "waiting for nodes: $ready/$want Ready ($w/$want_w dilated workers)"
     sleep 10
   done
-  [ "$ready" -ge "$want" ] || { echo "FATAL: only $ready/$want nodes Ready after 2 h"; $K get nodes; exit 1; }
+  [ "$w" -ge 1 ] && [ $((ready - w)) -ge "$want_o" ] || { echo "FATAL: only $ready/$want nodes Ready after 2 h"; $K get nodes; exit 1; }
   done_ cluster
 fi
-WORKERS=$($K get nodes -l dilated=true -o jsonpath='{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address}{" "}{end}')
+# Ready dilated workers only (a node that joined but went NotReady would fail every later step)
+WORKERS=$($K get nodes -l dilated=true -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{" "}{.status.addresses[?(@.type=="InternalIP")].address}{"\n"}{end}' | awk '$1=="True"{printf "%s ", $2}')
 PROXIES=$($K get nodes --no-headers -o custom-columns=N:.metadata.name | grep '^proxy-' | sort -t- -k2 -n)
 echo "workers: $WORKERS | proxies: $(echo $PROXIES)"
 
