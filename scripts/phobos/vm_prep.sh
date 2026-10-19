@@ -10,8 +10,9 @@ modprobe sctp || true
 # association retransmission budget and abort a healthy primary path
 echo 'net.sctp.association_max_retrans = 65535' > /etc/sysctl.d/90-phobos-sctp.conf
 # gNB nFAPI P5/P7 ports (50601+8k / 50611+8k) sit inside the ephemeral range: hundreds of hostNetwork UE sockets
-# on one VM can grab one first (gNB P7 bind EADDRINUSE)
-echo 'net.ipv4.ip_local_reserved_ports = 50600-51600' > /etc/sysctl.d/91-phobos-ports.conf
+# on one VM can grab one first (gNB P7 bind EADDRINUSE). Up to 1024 gNBs: 50601 .. 50611+8*1023 (50600-51600 covered
+# only ~125: gnb727 lost P5 port 56417 at 1000 gNBs)
+echo 'net.ipv4.ip_local_reserved_ports = 50600-58800' > /etc/sysctl.d/91-phobos-ports.conf
 # core dumps of crashing UEs/gNBs land in /var/crash (pods mount it): gdb post-mortems
 mkdir -p /var/crash && chmod 1777 /var/crash
 echo 'kernel.core_pattern=/var/crash/core.%e.%p.%t' > /etc/sysctl.d/92-phobos-core.conf
